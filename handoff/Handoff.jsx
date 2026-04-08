@@ -1,6 +1,6 @@
 /*
     Handoff — ScriptUI Panel
-    Version: 1.0.2
+    Version: 1.0.3
 
     Weighted, switchable, sticky dynamic parenting for After Effects.
 
@@ -188,31 +188,41 @@
         ''
     ].join('\n');
 
-    // ---- Position expression -------------------------------------------------
+    // ---- Position expressions ------------------------------------------------
     //
     // Segment-based integration of weighted parent velocity in world space.
     // For each parent slot, walk the channel\'s weight keyframes and integrate
     // the parent\'s world motion weighted by the segment weight. Constant
     // segments use the closed form (toWorld(tB) - toWorld(tA)) * weight;
     // variable segments use a per-frame midpoint Riemann sum.
+    //
+    // Five flavors of position expression — they share the same integration
+    // body (POSITION_INTEGRATE) and only differ in the final output line.
+    // The right one to use depends on whether the layer\'s Position property
+    // has Separate Dimensions enabled:
+    //
+    //   not separated -> EXPR_POSITION on the unified ADBE Position
+    //   separated     -> EXPR_POSITION_X / _Y / _Z on each ADBE Position_N
+    //
+    // The integration always accumulates a 3D vector total (verified that
+    // AE\'s add() pads mismatched-length inputs to the longer length with
+    // zeros, so add([0,0,0], [x,y]) = [x, y, 0] cleanly). For 2D parents
+    // the Z component just stays at 0 throughout.
 
-    var EXPR_POSITION = EXPR_PREAMBLE + SEGS_HELPER + [
+    var POSITION_INTEGRATE = EXPR_PREAMBLE + SEGS_HELPER + [
         'function pOff(p) {',
         '    var lyr   = FX("P" + p + " Layer");',
         '    var wProp = wPropFor(p, "Position");',
         '    var a     = lyr.transform.anchorPoint.value;',
-        '    var n     = value.length;',
-        '    var zero  = [];',
-        '    for (var i = 0; i < n; i++) { zero[i] = 0; }',
         '',
         '    if (wProp.numKeys === 0) {',
         '        var wVal = clamp01(wProp.value);',
-        '        if (wVal === 0) { return zero; }',
+        '        if (wVal === 0) { return [0, 0, 0]; }',
         '        return mul(sub(lyr.toWorld(a, time), lyr.toWorld(a, 0)), wVal);',
         '    }',
         '',
         '    var segs = segsFor(wProp);',
-        '    var off  = zero;',
+        '    var off  = [0, 0, 0];',
         '    var pA   = lyr.toWorld(a, segs[0]);',
         '    var wA   = clamp01(wProp.valueAtTime(segs[0]));',
         '    for (var s = 1; s < segs.length; s++) {',
@@ -244,13 +254,22 @@
         '    return off;',
         '}',
         '',
-        'var total = [];',
-        'for (var i = 0; i < value.length; i++) { total[i] = 0; }',
+        'var total = [0, 0, 0];',
         'for (var p = 1; p <= ' + SLOTS + '; p++) {',
         '    try { total = add(total, pOff(p)); } catch (e) {}',
         '}',
-        'add(value, total);'
+        ''
     ].join('\n');
+
+    // For the unified Position property (dimensions NOT separated). Returns
+    // a vector matching value\'s dimensionality.
+    var EXPR_POSITION = POSITION_INTEGRATE + 'add(value, total);';
+
+    // For separated dimensions: each property\'s value is a scalar, and
+    // we add the corresponding component of the integrated total.
+    var EXPR_POSITION_X = POSITION_INTEGRATE + 'value + total[0];';
+    var EXPR_POSITION_Y = POSITION_INTEGRATE + 'value + total[1];';
+    var EXPR_POSITION_Z = POSITION_INTEGRATE + 'value + total[2];';
 
     // ---- Rotation expression -------------------------------------------------
 
@@ -1707,15 +1726,31 @@
         return null;
     }
 
-    function removeRig(layer) {
-        // Clear the three transform expressions first so they don\'t hold
-        // references to controls we\'re about to delete.
-        var tg = layer.property("ADBE Transform Group");
-        var props = ["ADBE Position", "ADBE Rotate Z", "ADBE Scale"];
-        for (var i = 0; i < props.length; i++) {
-            var pr = tg.property(props[i]);
-            if (pr.expressionEnabled) { pr.expression = ""; }
+    // Try to clear an expression on a property — but only if AE will let
+    // us. Hidden / non-settable properties (e.g. ADBE Position when
+    // dimensions are separated, or ADBE Position_0 when they\'re not)
+    // throw if we touch them. Swallow that throw so removeRig can be
+    // called on layers in any state.
+    function safeClearExpression(prop) {
+        if (!prop) { return; }
+        if (!prop.canSetExpression) { return; }
+        if (prop.expressionEnabled) {
+            try { prop.expression = ""; } catch (e) {}
         }
+    }
+
+    function removeRig(layer) {
+        // Clear all transform expressions we might have set, regardless
+        // of which dimension-separation state the layer is in. We touch
+        // every possible target property and skip the ones that can\'t
+        // accept expression writes.
+        var tg = layer.property("ADBE Transform Group");
+        safeClearExpression(tg.property("ADBE Position"));
+        safeClearExpression(tg.property("ADBE Position_0"));
+        safeClearExpression(tg.property("ADBE Position_1"));
+        safeClearExpression(tg.property("ADBE Position_2"));
+        safeClearExpression(tg.property("ADBE Rotate Z"));
+        safeClearExpression(tg.property("ADBE Scale"));
 
         // Remove the Handoff pseudo effect (current and legacy matchnames)
         // AND any legacy flat controls left from very old script versions.
@@ -1763,10 +1798,25 @@
         //    exclusion is handled inside the expression math, so the
         //    sub-controls themselves carry no expressions and a user
         //    pressing EE on the layer sees just these three rows.
-        var tg  = layer.property("ADBE Transform Group");
-        tg.property("ADBE Position").expression  = EXPR_POSITION;
-        tg.property("ADBE Rotate Z").expression  = EXPR_ROTATION;
-        tg.property("ADBE Scale").expression     = EXPR_SCALE;
+        //
+        //    Position needs special handling for layers with Separate
+        //    Dimensions enabled: the unified ADBE Position becomes hidden
+        //    and you have to write to ADBE Position_0/_1/_2 instead. We
+        //    detect that state and route the expression accordingly.
+        var tg = layer.property("ADBE Transform Group");
+        var pos = tg.property("ADBE Position");
+        if (pos.dimensionsSeparated) {
+            tg.property("ADBE Position_0").expression = EXPR_POSITION_X;
+            tg.property("ADBE Position_1").expression = EXPR_POSITION_Y;
+            // Z only exists on 3D layers; .threeDLayer is the gate.
+            if (layer.threeDLayer) {
+                tg.property("ADBE Position_2").expression = EXPR_POSITION_Z;
+            }
+        } else {
+            pos.expression = EXPR_POSITION;
+        }
+        tg.property("ADBE Rotate Z").expression = EXPR_ROTATION;
+        tg.property("ADBE Scale").expression    = EXPR_SCALE;
     }
 
     // ---- UI ------------------------------------------------------------------
