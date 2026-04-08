@@ -94,13 +94,6 @@ function ensureFFX() {
     return ffx;
 }
 
-function sharedWeightClamp(p) {
-    return 'effect("' + EFFECT_NAME + '")("' + nUseIndiv(p) + '").value > 0.5 ? 0 : value';
-}
-function individualWeightClamp(p) {
-    return 'effect("' + EFFECT_NAME + '")("' + nUseIndiv(p) + '").value > 0.5 ? value : 0';
-}
-
 var LEGACY_PATTERNS = [/^Layer \\d+$/, /^Weight \\d+$/, /^Use Individual \\d+$/, /^Pos Weight \\d+$/, /^Rot Weight \\d+$/, /^Scale Weight \\d+$/];
 var LEGACY_EXACT = ["Use Individual Weights"];
 function isLegacyEffect(name) {
@@ -143,19 +136,12 @@ function applyRig(layer, ffxFile) {
     removeRig(layer);
     selectOnly(layer);
     layer.applyPreset(ffxFile);
-    var handoff = findHandoffEffect(layer);
-    if (handoff === null) { throw new Error("applyPreset did not install the Handoff effect."); }
-    for (var p = 1; p <= SLOTS; p++) {
-        var sharedW = handoff.property(nWeight(p));
-        var posW    = handoff.property(nPosWeight(p));
-        var sclW    = handoff.property(nSclWeight(p));
-        var rotW    = handoff.property(nRotWeight(p));
-        if (sharedW) { sharedW.expression = sharedWeightClamp(p); }
-        if (posW)    { posW.expression    = individualWeightClamp(p); }
-        if (sclW)    { sclW.expression    = individualWeightClamp(p); }
-        if (rotW)    { rotW.expression    = individualWeightClamp(p); }
+    if (findHandoffEffect(layer) === null) {
+        throw new Error("applyPreset did not install the Handoff effect.");
     }
-    var tg  = layer.property("ADBE Transform Group");
+    // No clamp expressions on sub-controls — wPropFor() inside the
+    // transform expressions handles mode selection mathematically.
+    var tg = layer.property("ADBE Transform Group");
     tg.property("ADBE Position").expression  = EXPR_POS;
     tg.property("ADBE Rotate Z").expression  = EXPR_ROT;
     tg.property("ADBE Scale").expression     = EXPR_SCL;
