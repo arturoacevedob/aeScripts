@@ -1,5 +1,5 @@
 /*
-    Handoff — ScriptUI Panel
+    Handoff v1.0 — ScriptUI Panel
     Weighted, switchable, sticky dynamic parenting for After Effects.
 
     What it does
@@ -97,8 +97,9 @@
 
 (function (thisObj) {
 
-    var SCRIPT_NAME = "Handoff";
-    var EFFECT_NAME = "Handoff";
+    var SCRIPT_NAME    = "Handoff";
+    var SCRIPT_VERSION = "1.0";  // bumped automatically by tools/bump_version.js
+    var EFFECT_NAME    = "Handoff";
 
     // ---- Pseudo effect layout ------------------------------------------------
     //
@@ -1765,7 +1766,7 @@
     function buildUI(thisObj) {
         var panel = (thisObj instanceof Panel)
             ? thisObj
-            : new Window("palette", SCRIPT_NAME, undefined, { resizeable: true });
+            : new Window("palette", SCRIPT_NAME + " v" + SCRIPT_VERSION, undefined, { resizeable: true });
 
         panel.orientation = "column";
         panel.alignChildren = ["fill", "fill"];
@@ -1785,7 +1786,7 @@
         var mainBtn = row.add("button", undefined, "Handoff");
         mainBtn.alignment = ["fill", "fill"];
         mainBtn.preferredSize = [-1, 32];
-        mainBtn.helpTip = "Apply dynamic parenting to selected layers";
+        mainBtn.helpTip = "Apply dynamic parenting to selected layers (Handoff v" + SCRIPT_VERSION + ")";
 
         // X button: width pinned at 32 (cap both ways), height tracks
         // the row so it stays the same height as the main button as the

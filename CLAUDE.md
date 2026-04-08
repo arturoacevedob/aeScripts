@@ -38,3 +38,25 @@ root `CLAUDE.md` AND the script's `CLAUDE.md` are loaded.
 - **Per-script READMEs** for end users. **Per-script CLAUDE.md files** for
   AI-assistant context.
 - **Never auto-commit.** Only commit when explicitly asked.
+
+## Versioning
+
+The `VERSION` file at the repo root holds the collection's current version
+(e.g., `1.0`). Every script's `SCRIPT_VERSION` constant in its `.jsx`
+mirrors this value and is shown in the script's Window title and helpTip.
+
+**Bump the version on every commit.** Workflow:
+
+```bash
+node tools/bump_version.js   # adds 0.1, updates VERSION + every .jsx target
+git add -A
+git commit -m "..."
+git push
+```
+
+`tools/bump_version.js` parses the current version as a decimal, adds
+0.1, formats with `toFixed(1)` (so 1.9 → 2.0 cleanly with no float drift),
+writes the new value to `VERSION`, and replaces the
+`var SCRIPT_VERSION = "X.Y";` line in every script registered in the
+`JSX_TARGETS` array inside the bump tool. Add new script `.jsx` files to
+that array as the collection grows.
