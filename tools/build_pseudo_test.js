@@ -61,7 +61,15 @@ var COMP_ID = 80485, APPLE_ID = 80517, RH_ID = 80516, LH_ID = 80515;
 
 var SLOTS = 5;
 var EFFECT_NAME = "Handoff";
-var HANDOFF_MATCHNAME = "Pseudo/PEM Matchname";
+var HANDOFF_MATCHNAME = "Pseudo/aeTools-Handoff";
+var LEGACY_HANDOFF_MATCHNAMES = ["Pseudo/PEM Matchname"];
+function isHandoffMatchname(mn) {
+    if (mn === HANDOFF_MATCHNAME) return true;
+    for (var i = 0; i < LEGACY_HANDOFF_MATCHNAMES.length; i++) {
+        if (mn === LEGACY_HANDOFF_MATCHNAMES[i]) return true;
+    }
+    return false;
+}
 
 function pn(prefix, n) { return "P" + n + " " + prefix; }
 function nLayer(n)     { return pn("Layer", n); }
@@ -106,7 +114,7 @@ function findHandoffEffect(layer) {
     var fxPar = layer.property("ADBE Effect Parade");
     for (var i = 1; i <= fxPar.numProperties; i++) {
         var fx = fxPar.property(i);
-        if (fx.name === EFFECT_NAME || fx.matchName === HANDOFF_MATCHNAME) return fx;
+        if (fx.name === EFFECT_NAME || isHandoffMatchname(fx.matchName)) return fx;
     }
     return null;
 }
@@ -121,7 +129,7 @@ function removeRig(layer) {
     var fxPar = layer.property("ADBE Effect Parade");
     for (var n = fxPar.numProperties; n >= 1; n--) {
         var fx = fxPar.property(n);
-        if (fx.name === EFFECT_NAME || fx.matchName === HANDOFF_MATCHNAME) { fxPar.property(n).remove(); }
+        if (fx.name === EFFECT_NAME || isHandoffMatchname(fx.matchName)) { fxPar.property(n).remove(); }
         else if (isLegacyEffect(fx.name)) { fxPar.property(n).remove(); }
     }
 }
