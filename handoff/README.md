@@ -32,42 +32,55 @@ Drop `Handoff.jsx` into After Effects' ScriptUI Panels folder:
 Restart After Effects. The panel appears under `Window → Handoff.jsx`. Dock it
 anywhere.
 
-> No pseudo-effect install needed. The script creates all required expression
-> controls programmatically on each layer it rigs. Works on any AE install
-> with no `PresetEffects.xml` editing.
+> **Single-file install.** `Handoff.jsx` is everything you need. No
+> `PresetEffects.xml` editing, no `.ffx` sidecar, no AE restart beyond the
+> first one. The pseudo effect is embedded inside the script as a binary
+> blob; on first run it gets cached to
+> `~/Library/Application Support/aeScripts/Handoff/Handoff.ffx` and
+> applied via `layer.applyPreset()`. Same pattern as Smart Rekt, Overlord,
+> and other widely-distributed AE scripts.
 
 ## Use
 
 1. Select one or more layers in your comp.
 2. Click **Handoff**. The script attaches expressions to Position, Rotation,
-   and Scale, and adds **18 expression controls** to the layer — one
-   6-control block per parent slot, in this order:
-   - `Layer N` — layer picker for parent N
-   - `Weight N` — shared weight slider (0..1) for parent N
-   - `Use Individual N` — checkbox, off by default; toggles per-channel
-     weights for *this* parent only
-   - `Pos Weight N` — position-only weight, used when `Use Individual N` is on
-   - `Rot Weight N` — rotation-only weight, same
-   - `Scale Weight N` — scale-only weight, same
-3. Drop the parent layers into the `Layer N` slots and animate `Weight N` to
-   hand off between them.
+   and Scale, and applies a single **"Handoff" pseudo effect** to the layer.
+   The effect contains 5 collapsible Parent groups, each with:
+   - `P{n} Layer` — layer picker for parent n
+   - `P{n} Weight` — shared weight (0..1) driving all three channels
+   - `P{n} Individual Weights` (sub-group)
+     - `P{n} Use Individual Weights` — checkbox, off by default
+     - `P{n} Position` — per-channel position weight
+     - `P{n} Scale` — per-channel scale weight
+     - `P{n} Rotation` — per-channel rotation weight
+3. Drop the parent layers into the `P{n} Layer` slots and animate
+   `P{n} Weight` (or the individual sliders) to hand off between them.
 4. To remove the rig, click the **✕** button. It clears the expressions and
-   removes every managed control (matched by name pattern so it also cleans
-   up rigs from older versions of the script).
+   removes the Handoff effect (and any leftover controls from older
+   versions of the script).
 
-The default `SLOTS` constant at the top of `Handoff.jsx` is **3** — three
-parent slots, 18 top-level effects. Bump `SLOTS` up if you need more
-(e.g., 5 parents = 30 controls); the math and expressions scale
-automatically.
+The Handoff effect is a single collapsible block in the Effect Controls
+panel — twirl down `Parent N` to see that parent's controls, twirl down
+`P{n} Individual Weights` to expose the per-channel sliders. Same UX as
+Smart Rekt and other Pseudo Effect Maker-built rigs.
 
 ### Shared vs individual weights
 
-By default, `Weight N` controls position, rotation, and scale together for
-parent N — the simple case. Toggle **Use Individual N** to drive position,
-rotation, and scale independently via `Pos Weight N`, `Rot Weight N`, and
-`Scale Weight N`. Because the checkbox is per-parent, you can have one
-parent contributing shared motion while another parent contributes only
-position, for example.
+By default, `P{n} Weight` controls position, rotation, and scale together
+for parent n — the simple case. Toggle **`P{n} Use Individual Weights`**
+to drive position, rotation, and scale independently via `P{n} Position`,
+`P{n} Scale`, and `P{n} Rotation`. The toggle is **per-parent**, so you can
+mix shared and individual modes across parent slots — e.g., parent 1 uses
+shared weight, parent 2 contributes only position via the individual
+slider.
+
+When the checkbox is OFF, the individual sliders are clamped to 0 by an
+expression on each one (so they have no effect on the rig). When the
+checkbox is ON, the shared weight slider is clamped to 0 the same way.
+This mutual-exclusion is purely cosmetic — only one mode is "live" for
+each parent at any time, even though all sliders are visually editable.
+(AE doesn't let scripts gray out pseudo-effect sub-parameters at runtime;
+this clamp pattern is the closest approximation.)
 
 ## How the math works
 
@@ -143,6 +156,32 @@ engines.
   If you keyframe the host's own position while it's rigged, the host's
   keyframes will animate underneath the rig's contribution — usually
   not what you want. Animate a parent layer instead, or bake the rig.
+- **Keyframing the `Use Individual Weights` checkbox isn't recommended.**
+  The expression samples the checkbox state at the current evaluation
+  time and picks one slider as the "live" weight source for each channel.
+  If you keyframe the toggle itself, the segment integration won't see
+  the toggle as a boundary and the contribution from before the toggle
+  may be miscounted. Pick a mode per parent and stick with it.
+
+## Updating the embedded preset (developers)
+
+`Handoff.jsx` ships with the pseudo effect's binary `.ffx` embedded as a
+hex string. To regenerate it after editing the pseudo effect in
+[Pseudo Effect Maker](https://aescripts.com/pseudo-effect-maker/):
+
+1. Save the updated `.ffx` over `handoff/Handoff.ffx` (the source-of-truth
+   binary lives in the repo so it can be inspected and re-edited).
+2. From the repo root, run:
+   ```
+   node tools/embed_ffx.js
+   ```
+3. This rewrites the `EMBED:BEGIN`...`EMBED:END` block inside
+   `handoff/Handoff.jsx` with the encoded bytes from the new `.ffx`.
+4. Commit both files together.
+
+End users only need `Handoff.jsx`. The `.ffx` in the repo is for
+development only — the script writes its own copy to the user's
+`Application Support` folder on first run from the embedded data.
 
 ## History
 
@@ -151,9 +190,10 @@ timeline on every single frame and had a correctness bug under the V8
 expression engine: array `+`/`-`/`*` operators do string concatenation or
 NaN instead of component-wise math. This rewrite fixes the V8 bug, extends
 the rig from position-only to all three transform channels (position,
-rotation, scale), adds the shared-vs-individual weight mode, drops the
-PresetEffects.xml pseudo-effect install dependency in favor of programmatic
-control creation, and was live-verified in AE 2025 against a handoff
+rotation, scale), adds the shared-vs-individual weight mode, replaces the
+flat 18-control programmatic layout with a single-file pseudo effect
+delivery (Pseudo Effect Maker → embedded binary in the .jsx → cached and
+applied on first run), and was live-verified in AE 2025 against a handoff
 between two animated hand layers. See the git log for the full diff,
 including an interim recursive-delta attempt that was reverted after live
 testing showed AE's expression engine does not support the recursion
