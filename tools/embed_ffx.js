@@ -13,7 +13,7 @@
 //   node tools/embed_ffx.js
 //
 // Output:
-//   - Updates handoff/Handoff vX.Y.Z.jsx in place
+//   - Updates handoff/Handoff.jsx in place
 //   - Prints the embedded byte count and chunk count
 
 const fs = require('fs');
@@ -21,24 +21,7 @@ const path = require('path');
 
 const ROOT     = path.resolve(__dirname, '..');
 const FFX_PATH = path.join(ROOT, 'handoff', 'Handoff.ffx');
-
-// The .jsx filename carries the version (e.g. "Handoff v1.0.5.jsx") and
-// gets renamed by tools/bump_version.js on each commit. Find it via glob
-// instead of hardcoding the version in the path.
-function findHandoffJsx() {
-    const dir = path.join(ROOT, 'handoff');
-    const files = fs.readdirSync(dir).filter(f => /^Handoff v\d+\.\d+\.\d+\.jsx$/.test(f));
-    if (files.length === 0) {
-        console.error('ERROR: no "Handoff v*.jsx" file found in ' + dir);
-        process.exit(1);
-    }
-    if (files.length > 1) {
-        console.error('ERROR: multiple "Handoff v*.jsx" files in ' + dir + ' — clean up old versions:\n  ' + files.join('\n  '));
-        process.exit(1);
-    }
-    return path.join(dir, files[0]);
-}
-const JSX_PATH = findHandoffJsx();
+const JSX_PATH = path.join(ROOT, 'handoff', 'Handoff.jsx');
 
 const BEGIN_MARKER = '// EMBED:BEGIN handoff_ffx_binary';
 const END_MARKER   = '// EMBED:END handoff_ffx_binary';
@@ -116,7 +99,7 @@ function main() {
     fs.writeFileSync(JSX_PATH, newJsx);
 
     const chunkLines = encodeBytes(ffxBytes).split('\n').length;
-    console.log('Embedded ' + ffxBytes.length + ' bytes into ' + path.basename(JSX_PATH));
+    console.log('Embedded ' + ffxBytes.length + ' bytes into Handoff.jsx');
     console.log('  ' + chunkLines + ' chunk lines, ' + CHUNK_BYTES + ' bytes per chunk');
     console.log('  Final .jsx size: ' + fs.statSync(JSX_PATH).size + ' bytes');
 }

@@ -39,19 +39,20 @@ root `CLAUDE.md` AND the script's `CLAUDE.md` are loaded.
   AI-assistant context.
 - **Never auto-commit.** Only commit when explicitly asked.
 
-## Versioning (semver, in the filename)
+## Versioning (semver, in the file's comment header)
 
 The version lives in **two places**, kept in lockstep:
 
-1. **`VERSION`** at the repo root — single line, e.g. `1.0.1`
-2. **The `.jsx` filename** — e.g. `handoff/Handoff v1.0.1.jsx`
+1. **`VERSION`** at the repo root — single line, e.g. `1.0.2`
+2. **The `Version: X.Y.Z` line** in each script's header comment block —
+   second line, just under the script name
 
-There is intentionally NO `SCRIPT_VERSION` constant inside the script
-source. The filename IS the version, which means AE shows it
-automatically in the **`Window` menu** and the **docked panel tab title**
-without the script having to render anything in its UI. Script display
-names stay clean ("Handoff", not "Handoff v1.0.1") forever — only the
-filename carries the version.
+The `.jsx` **filename stays clean** (`Handoff.jsx`, not
+`Handoff v1.0.2.jsx`) so AE's docked panel header reads "Handoff" with
+no version clutter. The script's UI also stays clean — no version on
+the button, no version in the Window title. The version is visible
+only to people who open the source file (where it sits at the top of
+the comment block) and to anyone reading `VERSION` in the repo.
 
 **Bump the version on every commit**, choosing the right segment:
 
@@ -74,13 +75,9 @@ git push
 
 `tools/bump_version.js` parses the current version, increments the
 requested segment (resetting lower segments per semver), writes the
-new value to `VERSION`, and **renames** every script registered in the
-`SCRIPTS` array inside the bump tool (e.g.
-`Handoff v1.0.4.jsx` → `Handoff v1.0.5.jsx`). Add new scripts to that
-array as the collection grows. Each entry has `dir`, `prefix`, and
-`suffix` — the bump tool finds the current versioned filename via glob
-and renames it in place.
-
-Other tools that need to read a script's source (`embed_ffx.js`,
-`build_pseudo_test.js`) also use the same glob pattern to locate the
-current versioned `.jsx` file, so renames don't break them.
+new value to `VERSION`, and rewrites the `Version: X.Y.Z` line inside
+every `.jsx` registered in the `JSX_TARGETS` array inside the bump
+tool. Add new scripts to that array as the collection grows. Each
+script must have a `Version: X.Y.Z` line somewhere in its header
+comment block — the bump tool matches with a regex (`/Version:\s*\d+\.\d+\.\d+/`)
+so the surrounding indent and formatting is preserved.

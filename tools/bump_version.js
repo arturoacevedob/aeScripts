@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // bump_version.js — increment the aeTools collection version (semver).
 //
-// The version lives in two places:
+// The version lives in two places, kept in lockstep:
 //   1. /VERSION at the repo root (single line, e.g. "1.0.5")
-//   2. The .jsx filename of every script (e.g. "Handoff v1.0.5.jsx")
+//   2. The "Version: X.Y.Z" line inside each script's header comment block
 //
-// There is intentionally NO SCRIPT_VERSION constant inside the .jsx
-// source. The filename IS the version, which means AE shows it in the
-// Window menu and the docked tab title automatically without the script
-// having to render anything in its UI. The script's display name stays
-// "Handoff" forever.
+// The .jsx FILENAME stays clean (e.g. "Handoff.jsx") so AE's docked panel
+// header reads "Handoff" with no version clutter. The script display
+// name stays "Handoff" forever. The version is visible to anyone who
+// opens the source — second line of the script header comment block —
+// but never appears in the user-facing UI.
 //
 // Usage:
 //   node tools/bump_version.js              # patch (default): 1.0.5 -> 1.0.6
@@ -35,15 +35,11 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const VERSION_FILE = path.join(ROOT, 'VERSION');
 
-// Each script the bump tool manages. The bump tool finds the current
-// versioned filename via the prefix + suffix pattern, then renames it.
-// Add new scripts here as the collection grows.
-const SCRIPTS = [
-    {
-        dir: path.join(ROOT, 'handoff'),
-        prefix: 'Handoff v',
-        suffix: '.jsx',
-    }
+// Each script the bump tool manages. The tool finds the "Version: X.Y.Z"
+// line in the script's header comment block and rewrites it. Add new
+// scripts here as the collection grows.
+const JSX_TARGETS = [
+    path.join(ROOT, 'handoff', 'Handoff.jsx'),
 ];
 
 function parseSemver(versionStr) {
@@ -68,28 +64,6 @@ function format(v) {
     return v.major + '.' + v.minor + '.' + v.patch;
 }
 
-function findCurrent(script) {
-    if (!fs.existsSync(script.dir)) {
-        throw new Error('Script directory missing: ' + script.dir);
-    }
-    var files = fs.readdirSync(script.dir).filter(function (f) {
-        return f.indexOf(script.prefix) === 0
-            && f.lastIndexOf(script.suffix) === f.length - script.suffix.length;
-    });
-    if (files.length === 0) {
-        throw new Error(
-            'No file matching "' + script.prefix + '*' + script.suffix + '" in ' + script.dir
-        );
-    }
-    if (files.length > 1) {
-        throw new Error(
-            'Multiple matching files in ' + script.dir + ' — clean up old versions first:\n  '
-            + files.join('\n  ')
-        );
-    }
-    return path.join(script.dir, files[0]);
-}
-
 function main() {
     var level = (process.argv[2] || 'patch').toLowerCase();
     if (level !== 'patch' && level !== 'minor' && level !== 'major') {
@@ -109,16 +83,29 @@ function main() {
     fs.writeFileSync(VERSION_FILE, newStr + '\n');
     console.log('VERSION: ' + oldStr + ' -> ' + newStr + '  (' + level + ')');
 
-    for (var i = 0; i < SCRIPTS.length; i++) {
-        var s = SCRIPTS[i];
-        var oldPath = findCurrent(s);
-        var newPath = path.join(s.dir, s.prefix + newStr + s.suffix);
-        if (oldPath === newPath) {
-            console.warn('  WARN: script already at ' + newStr + ' (' + path.basename(oldPath) + ')');
+    var updated = 0;
+    for (var i = 0; i < JSX_TARGETS.length; i++) {
+        var jsxPath = JSX_TARGETS[i];
+        if (!fs.existsSync(jsxPath)) {
+            console.warn('  WARN: skipping missing target ' + jsxPath);
             continue;
         }
-        fs.renameSync(oldPath, newPath);
-        console.log('  ' + path.relative(ROOT, oldPath) + ' -> ' + path.relative(ROOT, newPath));
+        var before = fs.readFileSync(jsxPath, 'utf8');
+        // Match "Version: X.Y.Z" anywhere on a comment line. Indent and
+        // surrounding whitespace are preserved.
+        var pattern = /(Version:\s*)\d+\.\d+\.\d+/;
+        if (!pattern.test(before)) {
+            console.warn('  WARN: no "Version: X.Y.Z" line found in ' + path.basename(jsxPath));
+            continue;
+        }
+        var after = before.replace(pattern, '$1' + newStr);
+        fs.writeFileSync(jsxPath, after);
+        console.log('  ' + path.relative(ROOT, jsxPath) + ': comment header updated to ' + newStr);
+        updated++;
+    }
+
+    if (updated === 0) {
+        console.warn('No .jsx targets updated. Did you forget the "Version: X.Y.Z" line?');
     }
 }
 
