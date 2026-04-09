@@ -429,14 +429,6 @@
         'if (typeof HANDOFF_BAKED_APPLY_OFFSET_POS !== "undefined") {',
         '    total = sub(total, HANDOFF_BAKED_APPLY_OFFSET_POS);',
         '}',
-        '// Child-drift guard: if the child moved since baking, suppress ALL',
-        '// tracking to prevent a visible jump. The poll rebakes in ~100ms.',
-        'if (typeof HANDOFF_BAKED_CHILD_REST !== "undefined") {',
-        '    var _cd = sub(value, HANDOFF_BAKED_CHILD_REST);',
-        '    if (Math.abs(_cd[0]) > 0.5 || Math.abs(_cd[1]) > 0.5) {',
-        '        total = [0, 0, 0];',
-        '    }',
-        '}',
         ''
     ].join('\n');
 
