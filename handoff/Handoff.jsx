@@ -429,16 +429,6 @@
         'if (typeof HANDOFF_BAKED_APPLY_OFFSET_POS !== "undefined") {',
         '    total = sub(total, HANDOFF_BAKED_APPLY_OFFSET_POS);',
         '}',
-        '// Child-drift guard for non-keyframed children only. When the user',
-        '// moves the child after parenting, the baked delta would cause a jump.',
-        '// Suppressing total keeps the child where placed. Click Handoff to rebake.',
-        '// Keyframed children are exempt (their value varies over time naturally).',
-        'if (typeof HANDOFF_BAKED_CHILD_REST !== "undefined" && thisProperty.numKeys === 0) {',
-        '    var _cd = sub(value, HANDOFF_BAKED_CHILD_REST);',
-        '    if (Math.abs(_cd[0]) > 0.5 || Math.abs(_cd[1]) > 0.5 || (value.length > 2 && Math.abs(_cd[2]) > 0.5)) {',
-        '        total = [0, 0, 0];',
-        '    }',
-        '}',
         ''
     ].join('\n');
 
