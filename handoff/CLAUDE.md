@@ -1,9 +1,36 @@
 # handoff — Claude Code instructions
 
-Dynamic parenting rig for After Effects, shipped as a single `.jsx` with the
-pseudo-effect `.ffx` embedded as a hex-escape binary string. End users only
-need `Handoff.jsx`. Source-of-truth `.ffx` lives at `handoff/Handoff.ffx`
-for editing in Pseudo Effect Maker.
+Dynamic parenting rig for After Effects. Two delivery modes:
+1. **CEP panel** (`handoff/cep/`) — auto-rebakes via 100ms polling loop.
+   Install for dev: `bash handoff/tools/install_cep_dev.sh`, restart AE.
+2. **Standalone JSX** (`Handoff.jsx`) — fallback, requires manual rebake.
+
+Source-of-truth `.ffx` lives at `handoff/Handoff.ffx`. CEP bundles it
+directly; standalone JSX embeds it as hex-escaped binary.
+
+## CEP architecture (v1.3.x)
+
+`host.jsx` sets `$.global.__handoff_cep = true`, then `$.evalFile`s
+`Handoff.jsx`. The IIFE detects CEP mode and exports functions to
+`$.global.__handoff` instead of building ScriptUI. ONE source of truth.
+
+`main.js` polls via `CSInterface.evalScript('cepReadRigState()')` every
+100ms. Read-only calls do NOT create undo entries (unlike scheduleTask).
+Writes only on detected changes — one undo group per rebake.
+
+**Change detection triggers:**
+- Parent assignment changed → `cepPreserveAndRebake` (preserve visual)
+- Weight dropped to 0 (unparent) → `cepPreserveAndRebake` (preserve visual)
+- Weight keyframes moved/added/removed → `cepApplyOrRefresh` (recompute from rest)
+- Child rest position changed → `cepApplyOrRefresh` (debounced, 300ms settle)
+
+**Key distinction:** parent/unparent changes preserve the POST-expression
+visual (cached from previous poll). Keyframe/child changes recompute from
+the PRE-expression rest position to avoid cascading corruption.
+
+**Live reload without restarting AE:**
+- ExtendScript: `_handoffJSXLoaded = false; _ensureLoaded();`
+- CEP panel JS: open `localhost:8088` in Chrome, Cmd+R
 
 ## Live AE testing — atom-ae MCP server
 
@@ -23,11 +50,11 @@ Useful tools: `initialize_session` (call first, returns Atom instructions
 `revert_checkpoint` (id from prior output), `list_layers`, `get_keyframes`,
 `scan_property_tree`, `preview_frames` (base64 contact sheets).
 
-Test fixture: `dynamicParenting` comp (id `80485`). Layer IDs change
-across sessions — always use `list_layers` or `initialize_session` to
-get current IDs. Look for layers named `Apple`, `Right Hand`,
-`Left Hand`. Use `__handoff_applyById(layerId)` via `$.global` to
-apply/refresh the rig programmatically after `$.evalFile` on the script.
+Test fixture: `dynamicParenting` comp (id changes across sessions).
+Layer IDs change across sessions — always use `list_layers` or
+`initialize_session` to get current IDs. Look for layers named `Apple`,
+`Right Hand`, `Left Hand`, plus native-parented reference layers
+`Apple (ae native) 1` and `Apple (ae native) 2`.
 
 ## Critical: pLocal baking via expression probes (v1.2.0)
 
@@ -45,16 +72,41 @@ identity holds (toWorld(fromWorld(X)) === X).
 `accumulatedScale` helpers for baking values that will be consumed by
 expressions.** Always probe through the expression engine.
 
-## Rigid fallback architecture (v1.2.0)
+## Rigid fallback architecture (v1.3.x)
 
-The rigid fallback now runs for ALL parents with constant weight (no
-weight keyframes), not just static parents (the old `_rHasKeys` gate).
-This means keyframed parents also get rigid tracking via
-`parent.toWorld(BAKED_LOCAL_P, time) - BAKED_CHILD_REST`.
+The rigid fallback runs ONLY for **static parents** (no keyframes on the
+parent layer's own position/rotation/scale AND no keyframes on the weight).
+It is skipped when:
+1. `HANDOFF_BAKED_SLOTS_VALID[p] === false` (slot empty at bake time)
+2. `_rlyr.index !== HANDOFF_BAKED_PARENT_INDICES[p]` (parent swapped)
+3. `_rlyr.position.numKeys > 0` etc. (parent is keyframed — segment walker handles it)
 
-Parents with weight keyframes are handled by the segment walker for
-crossfade/handoff transitions. No double-counting because the rigid
-fallback skips those parents (`_rwp.numKeys > 0 → continue`).
+**DO NOT run the rigid fallback for keyframed parents.** The segment walker
+already computes the correct delta via live fromWorld/toWorld. Running both
+double-counts the parent's contribution (verified: 2x position, 2x rotation,
+2x scale).
+
+## Apply-time preservation (v1.3.2)
+
+`refreshRig` reads `readOldApplyTime(layer)` BEFORE clearing expressions,
+then passes the saved time to `writeExpressions(layer, fx, savedApplyTime)`.
+All snapshot/bake/calibration operations use this time, not `comp.time`.
+Without this, rebakes triggered by CEP at arbitrary playhead positions
+anchor the rig at the wrong time, making tracking correct only at the
+playhead but wrong everywhere else.
+
+## Rotation must use frame-by-frame Riemann sum (v1.3.1)
+
+`worldRot()` uses `atan2` which wraps at ±180°. The old closed-form
+`unwrap(worldRot(lyr, time) - worldRot(lyr, 0))` fails for cumulative
+rotation >180° — it clips 216° to -144°. Adding a weight keyframe
+changed the code path (fast path → segment walk), producing inconsistent
+rotation and "group mismatch" errors.
+
+**ALL rotation computation now uses the Riemann sum** (frame-by-frame
+`unwrap(rNext - rPrev)` accumulation), both for constant-weight and
+variable-weight segments. Per-frame deltas are always <180° at any
+reasonable framerate, so unwrap works correctly.
 
 ## refreshRig must clear expressions first (v1.2.0)
 
@@ -62,6 +114,14 @@ fallback skips those parents (`_rwp.numKeys > 0 → continue`).
 `writeExpressions`. Without this, the two-pass visual-preservation
 snapshot captures the old rig's stale-bake output (e.g. child snapped
 to parent center), and the offset locks in that wrong position.
+
+## Resolved: child-move-after-parenting (v1.3.0)
+
+CEP poll detects child rest-position changes (debounced, 300ms settle
+after mouse release) and auto-rebakes. The expression does NOT snap to
+rest on child move — that caused visible flashing. The rigid fallback
+runs with stale bakes (slightly wrong orbit center) for up to 300ms
+until the CEP corrects it.
 
 ## Approaches that FAILED — do not retry
 
@@ -88,23 +148,27 @@ to parent center), and the offset locks in that wrong position.
   events causing phantom bugs. ALWAYS close stale palettes (up to 30)
   before any `$.evalFile` call during testing.
 
-## Known open issue — child-move-after-parenting (next session)
+- **`_restFresh` check in position rigid fallback (skipping when child
+  rest != baked rest).** Causes the child to flash to its rest position
+  for one poll cycle when the child is moved. The CEP debounced rebake
+  handles child moves instead.
 
-When the user moves the child AFTER parenting, `BAKED_LOCAL_P` and
-`BAKED_CHILD_REST` reference the old position. The rigid fallback
-computes orbit/scale deltas relative to the old position, so:
+- **`fromWorld` freshness check for parent swap detection.** Comparing
+  `parent.fromWorld(childRest, bakeTime)` to `BAKED_LOCAL_P` catches
+  parent swaps but ALSO fires when the parent MOVES (same layer, different
+  transform). This kills rigid tracking entirely. Use parent-INDEX
+  comparison (`_rlyr.index !== BAKED_PARENT_INDICES[p]`) instead.
 
-- Position: child jumps to wrong location
-- Rotation orbit: orbits around wrong center
-- Scale radial: scales from wrong center
+- **Rotation closed-form `unwrap(rB - rA)` for constant-weight segments.**
+  Wraps incorrectly for cumulative rotation >180°. Adding a weight
+  keyframe changes the code path, producing inconsistent values. Always
+  use frame-by-frame Riemann sum.
 
-**Click Handoff to rebake** from the new position. This works correctly.
-
-The auto-rebake poll (app.scheduleTask) solved this but destroyed undo
-history. A future session should explore alternatives:
-- CEP/UXP panel with event listeners (can detect property changes)
-- Expression-level self-correction without baked references
-- Hybrid: expression detects drift + stores correction in effect slider
+- **`cepPreserveAndRebake` for keyframe changes.** Preserves the
+  post-expression visual as the new rest value. If the expression was
+  already producing garbage (stale offset), the garbage gets baked into
+  the rest, creating a cascading corruption loop. Use `cepApplyOrRefresh`
+  (recompute from actual rest) for keyframe/child-move changes.
 
 ## AE expression engine — known traps (verified live in AE 2025)
 
@@ -138,6 +202,9 @@ These broke earlier rewrites. Don't rediscover them.
   `.property("Parent 1").property("P1 Layer")` (which throws).
 - **`addProperty` invalidates prior child refs** — re-acquire after each
   call.
+- **`_rlyr.position.numKeys` works in expressions.** Layer references from
+  `FX("P1 Layer")` support `.position`, `.rotation`, `.scale` accessors
+  with `.numKeys` to check if the parent has transform keyframes.
 
 ## Pseudo effect via embedded binary (Smart Rekt / rendertom pattern)
 
