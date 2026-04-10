@@ -92,24 +92,36 @@
 
     // ---- Polling Loop ----
 
+    // Track whether any layer is settling (keyframe drag in progress).
+    // When settling, use light-mode polls to avoid blocking AE's main
+    // thread with expensive expression evaluation.
+    var _anySettling = false;
+
     function poll() {
-        csInterface.evalScript('cepReadRigState()', function (result) {
+        var cmd = _anySettling
+            ? 'cepReadRigState(true)'
+            : 'cepReadRigState()';
+        csInterface.evalScript(cmd, function (result) {
             if (result === "EvalScript error." || !result) { return; }
             var state;
             try { state = JSON.parse(result); } catch (e) { return; }
             if (!state.active || !state.rigged) { return; }
+
+            _anySettling = false;
 
             for (var i = 0; i < state.rigged.length; i++) {
                 var lyr = state.rigged[i];
                 var prev = cache[lyr.id];
 
                 if (!prev) {
-                    // First time seeing this layer — cache and move on
+                    // First time seeing this layer — need full state.
+                    // If light mode returned nulls, skip until next full poll.
+                    if (!lyr.postPos) { continue; }
                     cache[lyr.id] = {
                         parents: lyr.parents.slice(),
                         weights: lyr.weights.slice(),
                         wkh:     lyr.wkh || "",
-                        restPos: lyr.restPos.slice(),
+                        restPos: lyr.restPos ? lyr.restPos.slice() : null,
                         postPos: lyr.postPos.slice(),
                         postRot: lyr.postRot,
                         postScl: lyr.postScl.slice(),
@@ -159,14 +171,16 @@
                 if (childMoved || keysChanged) {
                     // Position or keyframes still changing — user is dragging
                     // a layer or a keyframe. Update cache but DON'T rebake.
+                    // Keep previous postPos/restPos (light mode returns nulls).
+                    _anySettling = true;
                     cache[lyr.id] = {
                         parents: lyr.parents.slice(),
                         weights: lyr.weights.slice(),
                         wkh:     lyr.wkh || "",
-                        restPos: lyr.restPos.slice(),
-                        postPos: lyr.postPos.slice(),
-                        postRot: lyr.postRot,
-                        postScl: lyr.postScl.slice(),
+                        restPos: lyr.restPos || prev.restPos,
+                        postPos: lyr.postPos || prev.postPos,
+                        postRot: lyr.postPos ? lyr.postRot : prev.postRot,
+                        postScl: lyr.postScl || prev.postScl,
                         time:    state.time,
                         settling: true,
                         settleCount: 0
@@ -181,14 +195,15 @@
                     if (sc >= 3) {
                         settledRebake = true;
                     } else {
+                        _anySettling = true;
                         cache[lyr.id] = {
                             parents: lyr.parents.slice(),
                             weights: lyr.weights.slice(),
                             wkh:     lyr.wkh || "",
-                            restPos: lyr.restPos.slice(),
-                            postPos: lyr.postPos.slice(),
-                            postRot: lyr.postRot,
-                            postScl: lyr.postScl.slice(),
+                            restPos: lyr.restPos || prev.restPos,
+                            postPos: lyr.postPos || prev.postPos,
+                            postRot: lyr.postPos ? lyr.postRot : prev.postRot,
+                            postScl: lyr.postScl || prev.postScl,
                             time:    state.time,
                             settling: true,
                             settleCount: sc
@@ -212,10 +227,10 @@
                             parents: lyr.parents.slice(),
                             weights: lyr.weights.slice(),
                             wkh:     lyr.wkh || "",
-                            restPos: lyr.restPos.slice(),
-                            postPos: lyr.postPos.slice(),
-                            postRot: lyr.postRot,
-                            postScl: lyr.postScl.slice(),
+                            restPos: lyr.restPos || prev.restPos,
+                            postPos: lyr.postPos || prev.postPos,
+                            postRot: lyr.postPos ? lyr.postRot : prev.postRot,
+                            postScl: lyr.postScl || prev.postScl,
                             time:    state.time
                         };
                         continue;
@@ -250,10 +265,10 @@
                     parents: lyr.parents.slice(),
                     weights: lyr.weights.slice(),
                     wkh:     lyr.wkh || "",
-                    restPos: lyr.restPos ? lyr.restPos.slice() : null,
-                    postPos: lyr.postPos.slice(),
-                    postRot: lyr.postRot,
-                    postScl: lyr.postScl.slice(),
+                    restPos: lyr.restPos ? lyr.restPos.slice() : (prev ? prev.restPos : null),
+                    postPos: lyr.postPos ? lyr.postPos.slice() : (prev ? prev.postPos : null),
+                    postRot: lyr.postPos ? lyr.postRot : (prev ? prev.postRot : 0),
+                    postScl: lyr.postScl ? lyr.postScl.slice() : (prev ? prev.postScl : null),
                     time:    state.time
                 };
             }

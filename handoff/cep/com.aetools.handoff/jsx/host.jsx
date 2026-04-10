@@ -97,7 +97,7 @@ function cepRemoveRig(layerId) {
     return JSON.stringify({ok: true});
 }
 
-function cepReadRigState() {
+function cepReadRigState(lightMode) {
     _ensureLoaded();
     var H = $.global.__handoff;
     var comp = app.project.activeItem;
@@ -143,33 +143,41 @@ function cepReadRigState() {
             weightKeyHash += "|";
         }
 
-        var tg = lyr.property("ADBE Transform Group");
-        var posU = tg.property("ADBE Position");
-        var postPos;
-        if (posU.dimensionsSeparated) {
-            postPos = [
-                tg.property("ADBE Position_0").valueAtTime(comp.time, false),
-                tg.property("ADBE Position_1").valueAtTime(comp.time, false),
-                lyr.threeDLayer ? tg.property("ADBE Position_2").valueAtTime(comp.time, false) : 0
-            ];
-        } else {
-            var pv = posU.valueAtTime(comp.time, false);
-            postPos = [pv[0], pv[1], pv[2] || 0];
-        }
-        var postRot = tg.property("ADBE Rotate Z").valueAtTime(comp.time, false);
-        var postScl = tg.property("ADBE Scale").valueAtTime(comp.time, false);
+        // Light mode: skip expensive expression evaluation (postPos/postRot/
+        // postScl/restPos). Used during keyframe settling to avoid blocking
+        // AE's main thread during UI interactions (keyframe drags).
+        var postPos = null;
+        var postRot = 0;
+        var postScl = null;
+        var restPos = null;
 
-        // Pre-expression rest position (for detecting child moves)
-        var restPos;
-        if (posU.dimensionsSeparated) {
-            restPos = [
-                tg.property("ADBE Position_0").valueAtTime(comp.time, true),
-                tg.property("ADBE Position_1").valueAtTime(comp.time, true),
-                lyr.threeDLayer ? tg.property("ADBE Position_2").valueAtTime(comp.time, true) : 0
-            ];
-        } else {
-            var rv = posU.valueAtTime(comp.time, true);
-            restPos = [rv[0], rv[1], rv[2] || 0];
+        if (!lightMode) {
+            var tg = lyr.property("ADBE Transform Group");
+            var posU = tg.property("ADBE Position");
+            if (posU.dimensionsSeparated) {
+                postPos = [
+                    tg.property("ADBE Position_0").valueAtTime(comp.time, false),
+                    tg.property("ADBE Position_1").valueAtTime(comp.time, false),
+                    lyr.threeDLayer ? tg.property("ADBE Position_2").valueAtTime(comp.time, false) : 0
+                ];
+            } else {
+                var pv = posU.valueAtTime(comp.time, false);
+                postPos = [pv[0], pv[1], pv[2] || 0];
+            }
+            postRot = tg.property("ADBE Rotate Z").valueAtTime(comp.time, false);
+            postScl = tg.property("ADBE Scale").valueAtTime(comp.time, false);
+
+            // Pre-expression rest position (for detecting child moves)
+            if (posU.dimensionsSeparated) {
+                restPos = [
+                    tg.property("ADBE Position_0").valueAtTime(comp.time, true),
+                    tg.property("ADBE Position_1").valueAtTime(comp.time, true),
+                    lyr.threeDLayer ? tg.property("ADBE Position_2").valueAtTime(comp.time, true) : 0
+                ];
+            } else {
+                var rv = posU.valueAtTime(comp.time, true);
+                restPos = [rv[0], rv[1], rv[2] || 0];
+            }
         }
 
         rigged.push({
@@ -178,10 +186,10 @@ function cepReadRigState() {
             parents:  parents,
             wkh:      weightKeyHash,
             weights:  weights,
-            restPos:  [restPos[0], restPos[1], restPos[2] || 0],
-            postPos:  [postPos[0], postPos[1], postPos[2] || 0],
+            restPos:  restPos,
+            postPos:  postPos,
             postRot:  postRot,
-            postScl:  [postScl[0], postScl[1], postScl[2] || 0]
+            postScl:  postScl
         });
     }
 
