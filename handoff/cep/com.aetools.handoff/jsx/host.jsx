@@ -200,6 +200,9 @@ function cepPreserveAndRebake(layerId, cachedPosJson, cachedRot, cachedSclJson) 
     var cachedPos = (typeof cachedPosJson === "string") ? JSON.parse(cachedPosJson) : cachedPosJson;
     var cachedScl = (typeof cachedSclJson === "string") ? JSON.parse(cachedSclJson) : cachedSclJson;
 
+    // Save apply time BEFORE clearing expressions (v1.3.2 pattern)
+    var savedApplyTime = H.readOldApplyTime(layer);
+
     app.beginUndoGroup("Handoff Auto-Update");
     try {
         var tg = layer.property("ADBE Transform Group");
@@ -226,10 +229,10 @@ function cepPreserveAndRebake(layerId, cachedPosJson, cachedRot, cachedSclJson) 
         tg.property("ADBE Rotate Z").setValue(cachedRot);
         tg.property("ADBE Scale").setValue(cachedScl);
 
-        // Rebake with current parent configuration
+        // Rebake with current parent configuration, preserving apply time
         var fx = H.findHandoffEffect(layer);
         if (fx !== null) {
-            H.writeExpressions(layer, fx);
+            H.writeExpressions(layer, fx, savedApplyTime);
         }
     } finally {
         app.endUndoGroup();

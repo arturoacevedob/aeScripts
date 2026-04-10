@@ -1,6 +1,6 @@
 /*
     Handoff — ScriptUI Panel
-    Version: 1.3.2
+    Version: 1.4.0
 
     Weighted, switchable, sticky dynamic parenting for After Effects.
 
@@ -217,11 +217,18 @@
         '    var segs = [0];',
         '    var nk = wProp.numKeys;',
         '    for (var k = 1; k <= nk; k++) {',
-        '        var kt = wProp.key(k).time;',
-        '        if (kt > 0 && kt < time) { segs.push(kt); }',
+        '        try {',
+        '            var kt = wProp.key(k).time;',
+        '            if (kt > 0 && kt < time) { segs.push(kt); }',
+        '        } catch (e) {}',
         '    }',
         '    segs.push(time);',
-        '    return segs;',
+        '    segs.sort(function (a, b) { return a - b; });',
+        '    var d = [segs[0]];',
+        '    for (var i = 1; i < segs.length; i++) {',
+        '        if (segs[i] - d[d.length - 1] >= dt * 0.5) { d.push(segs[i]); }',
+        '    }',
+        '    return d;',
         '}',
         ''
     ].join('\n');
@@ -287,13 +294,20 @@
         '    if (_uwp === null) { continue; }',
         '    var _unk = _uwp.numKeys;',
         '    for (var _uk = 1; _uk <= _unk; _uk++) {',
-        '        var _ukt = _uwp.key(_uk).time;',
-        '        if (_ukt > 0 && _ukt < time) { segSet["t" + _ukt] = _ukt; }',
+        '        try {',
+        '            var _ukt = _uwp.key(_uk).time;',
+        '            if (_ukt > 0 && _ukt < time) { segSet["t" + _ukt] = _ukt; }',
+        '        } catch (_ke) {}',
         '    }',
         '}',
         'var allSegs = [];',
         'for (var _sk in segSet) { allSegs.push(segSet[_sk]); }',
         'allSegs.sort(function (_a, _b) { return _a - _b; });',
+        'var _dedup = [allSegs[0]];',
+        'for (var _dd = 1; _dd < allSegs.length; _dd++) {',
+        '    if (allSegs[_dd] - _dedup[_dedup.length - 1] >= dt * 0.5) { _dedup.push(allSegs[_dd]); }',
+        '}',
+        'allSegs = _dedup;',
         '',
         '// Walk segments, integrating weighted per-parent deltas into a',
         '// single shared `total` offset.',
@@ -2594,7 +2608,8 @@
             writeExpressions:     writeExpressions,
             writeAllExpressions:  writeAllExpressions,
             applyRig:             applyRig,
-            refreshRig:           refreshRig
+            refreshRig:           refreshRig,
+            readOldApplyTime:     readOldApplyTime
         };
 
         // Also install the test/automation hook for atom-ae compatibility

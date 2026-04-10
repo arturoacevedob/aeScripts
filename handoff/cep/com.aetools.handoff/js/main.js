@@ -198,10 +198,12 @@
                 }
 
                 // Two rebake paths depending on what changed:
-                //   preserveVisual: parent swap or unparent — keep child where it IS
-                //   recompute: keyframe change or child move — recompute from rest
-                var preserveVisual = parentChanged || unparented;
-                var recompute = settledRebake || keysChanged;
+                //   preserveVisual: unparent only — keep child where it IS
+                //   recompute: parent added/swapped, keyframe change, or child move
+                //     — recompute from rest (preserving rest avoids baking the
+                //     current expression delta into the base position)
+                var preserveVisual = unparented;
+                var recompute = parentChanged || settledRebake || keysChanged;
 
                 if (preserveVisual || recompute) {
                     // Time guard: skip if playhead moved since we cached.

@@ -196,10 +196,10 @@ Every 100ms:
 │                                                      │
 │ Compare to cached state:                             │
 │                                                      │
-│ parents[p] changed?                                  │
-│   → cepPreserveAndRebake (preserve visual)           │
+│ parents[p] changed? (added/swapped)                  │
+│   → cepApplyOrRefresh (recompute from rest)          │
 │                                                      │
-│ weights[w] went >0 to 0?                             │
+│ weights[w] went >0 to 0? (unparent)                  │
 │   → cepPreserveAndRebake (preserve visual)           │
 │                                                      │
 │ weightKeyHash changed? (keys moved/added/removed)    │
@@ -216,11 +216,13 @@ Every 100ms:
 **Key distinction between the two rebake paths:**
 - `cepPreserveAndRebake`: clears expressions, sets rest value to cached
   post-expression visual, then writes new expressions. Keeps the child
-  where it visually WAS. Used for parent changes and unparenting.
+  where it visually WAS. Used ONLY for unparenting (weight→0). Preserves
+  apply time via `readOldApplyTime` before clearing.
 - `cepApplyOrRefresh`: calls refreshRig which clears expressions and
-  recomputes from the child's actual rest position. Used for keyframe
-  changes and child moves. NEVER uses cached post-expression values
-  (they may be corrupt from stale offsets).
+  recomputes from the child's actual rest position. Used for parent
+  additions/swaps, keyframe changes, and child moves. NEVER uses cached
+  post-expression values (they bake the current expression delta into
+  the rest, corrupting tracking).
 
 ---
 
@@ -276,3 +278,6 @@ in the viewport. For everything else, the segment walker is sufficient.
 | Cascading position corruption | cepPreserveAndRebake bakes garbage visual into rest | Use cepApplyOrRefresh for keyframe/child-move changes |
 | Cursor fighting during child drag | Auto-rebake fires setValue while user is dragging | Debounce: wait 3 stable polls before rebake |
 | Parent swap flash | Old parent's baked pLocal used with new parent | Parent-index comparison skips mismatched slots |
+| P1 tracking breaks on P2 assign | cepPreserveAndRebake bakes P1 delta into rest | Parent additions use cepApplyOrRefresh (v1.4.0) |
+| Apply time lost in cepPreserve | Expressions cleared before reading apply time | readOldApplyTime before clear, pass to writeExpressions (v1.4.0) |
+| Expression errors on close keys | AE modifies keys mid-evaluation; zero-duration segments | try/catch on key access + segment dedup within dt*0.5 (v1.4.0) |

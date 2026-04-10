@@ -8,7 +8,7 @@ Dynamic parenting rig for After Effects. Two delivery modes:
 Source-of-truth `.ffx` lives at `handoff/Handoff.ffx`. CEP bundles it
 directly; standalone JSX embeds it as hex-escaped binary.
 
-## CEP architecture (v1.3.x)
+## CEP architecture (v1.4.x)
 
 `host.jsx` sets `$.global.__handoff_cep = true`, then `$.evalFile`s
 `Handoff.jsx`. The IIFE detects CEP mode and exports functions to
@@ -19,14 +19,16 @@ directly; standalone JSX embeds it as hex-escaped binary.
 Writes only on detected changes — one undo group per rebake.
 
 **Change detection triggers:**
-- Parent assignment changed → `cepPreserveAndRebake` (preserve visual)
+- Parent added/swapped → `cepApplyOrRefresh` (recompute from rest)
 - Weight dropped to 0 (unparent) → `cepPreserveAndRebake` (preserve visual)
 - Weight keyframes moved/added/removed → `cepApplyOrRefresh` (recompute from rest)
 - Child rest position changed → `cepApplyOrRefresh` (debounced, 300ms settle)
 
-**Key distinction:** parent/unparent changes preserve the POST-expression
-visual (cached from previous poll). Keyframe/child changes recompute from
-the PRE-expression rest position to avoid cascading corruption.
+**Key distinction:** only unparenting (weight→0) preserves the POST-expression
+visual. All other changes — including parent assignment — recompute from
+the PRE-expression rest position. Using `cepPreserveAndRebake` for parent
+additions bakes the current expression delta into the rest position,
+corrupting all tracking (see failed approaches).
 
 **Live reload without restarting AE:**
 - ExtendScript: `_handoffJSXLoaded = false; _ensureLoaded();`
@@ -86,14 +88,17 @@ already computes the correct delta via live fromWorld/toWorld. Running both
 double-counts the parent's contribution (verified: 2x position, 2x rotation,
 2x scale).
 
-## Apply-time preservation (v1.3.2)
+## Apply-time preservation (v1.3.2, extended v1.4.0)
 
-`refreshRig` reads `readOldApplyTime(layer)` BEFORE clearing expressions,
-then passes the saved time to `writeExpressions(layer, fx, savedApplyTime)`.
+Both `refreshRig` AND `cepPreserveAndRebake` read `readOldApplyTime(layer)`
+BEFORE clearing expressions, then pass the saved time to `writeExpressions`.
 All snapshot/bake/calibration operations use this time, not `comp.time`.
 Without this, rebakes triggered by CEP at arbitrary playhead positions
 anchor the rig at the wrong time, making tracking correct only at the
 playhead but wrong everywhere else.
+
+`readOldApplyTime` is exported via `$.global.__handoff` for `host.jsx`
+to call it from `cepPreserveAndRebake`.
 
 ## Rotation must use frame-by-frame Riemann sum (v1.3.1)
 
@@ -169,6 +174,31 @@ until the CEP corrects it.
   already producing garbage (stale offset), the garbage gets baked into
   the rest, creating a cascading corruption loop. Use `cepApplyOrRefresh`
   (recompute from actual rest) for keyframe/child-move changes.
+
+- **`cepPreserveAndRebake` for parent additions.** Sets rest = cached
+  post-expression visual at `comp.time`. This bakes the current parent
+  delta into the rest position, corrupting all tracking. For parent
+  additions (P2 assigned, weight=0), the expression was already tracking
+  P1 — the cached visual includes P1's delta at comp.time. Setting rest
+  to that, then re-anchoring at apply time (t=0), double-counts P1's
+  contribution. Use `cepApplyOrRefresh` for parent changes; reserve
+  `cepPreserveAndRebake` for unparenting only (weight→0).
+
+## Expression resilience: near-identical keyframes (v1.4.0)
+
+When users drag weight keyframes close together, AE can throw:
+- "attempt to get an item address from a position outside of list length"
+- "zero denominator converting ratio denominators"
+
+These are AE-internal errors from evaluating expressions while keyframes
+are at near-identical times. Guards added to all three expressions:
+1. **try/catch around `key(k).time`** — AE can delete/modify keys
+   mid-expression-evaluation during UI drags.
+2. **Segment deduplication** — boundaries within half a frame (`dt * 0.5`)
+   of each other are merged, preventing zero-duration segments.
+
+Applied to both `segsFor` (rotation/scale) and the position segment union
+builder.
 
 ## AE expression engine — known traps (verified live in AE 2025)
 
