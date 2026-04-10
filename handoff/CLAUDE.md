@@ -8,7 +8,7 @@ Dynamic parenting rig for After Effects. Two delivery modes:
 Source-of-truth `.ffx` lives at `handoff/Handoff.ffx`. CEP bundles it
 directly; standalone JSX embeds it as hex-escaped binary.
 
-## CEP architecture (v1.5.x)
+## CEP architecture (v1.6.x)
 
 `host.jsx` sets `$.global.__handoff_cep = true`, then `$.evalFile`s
 `Handoff.jsx`. The IIFE detects CEP mode and exports functions to
@@ -52,6 +52,23 @@ embedded blob (no size-comparison check). In CEP mode, the FFX is
 loaded from `assets/Handoff.ffx` inside the extension folder.
 `embed_ffx.js` copies the source FFX to both the JSX embed and the
 CEP assets folder to keep them in sync.
+
+**Auto-discovery (v1.6.0):** on file open/reopen, `cepReadRigState`
+detects that the registry has emptied (all old layer IDs became invalid)
+and scans every comp in the project for layers with the Handoff effect.
+This populates `_riggedLayerIds` so monitoring resumes without the user
+clicking Handoff. A `_discoveryNeeded` flag prevents infinite rescans on
+projects with no rigged layers. The prune loop keeps cross-comp layers
+so precomp rigs survive comp switches. The ↻ button in the status bar
+calls `cepForceDiscovery()` for manual rescan.
+
+**Stale apply-time guard (v1.6.0):** `readOldApplyTime` checks
+`HANDOFF_BAKED_SLOTS_VALID` in the existing expression. If all slots
+are false (no parents were active at the last bake), the stored apply
+time is stale and is discarded — `writeExpressions` falls back to
+`comp.time`. Without this, adding a parent to a layer with a stale
+rig anchors the tracking at the wrong time, causing a position/rotation
+jump.
 
 **Live reload without restarting AE:**
 - ExtendScript: `_handoffJSXLoaded = false; _ensureLoaded();`

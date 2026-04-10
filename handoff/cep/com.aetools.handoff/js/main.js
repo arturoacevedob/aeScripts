@@ -10,10 +10,26 @@
 
     var statusDot  = document.getElementById("status-dot");
     var statusText = document.getElementById("status-text");
+    var _statusHeldUntil = 0;
+    var _statusPending = null;
+    var STATUS_HOLD_MS = 500;
 
     function setStatus(color, text) {
+        var now = Date.now();
+        if (now < _statusHeldUntil) {
+            _statusPending = {color: color, text: text};
+            return;
+        }
         statusDot.className = color;
         statusText.textContent = text;
+        _statusHeldUntil = now + STATUS_HOLD_MS;
+        _statusPending = null;
+    }
+
+    function flushStatus() {
+        if (_statusPending && Date.now() >= _statusHeldUntil) {
+            setStatus(_statusPending.color, _statusPending.text);
+        }
     }
 
     // ---- Theme ----
@@ -100,6 +116,13 @@
         });
     });
 
+    document.getElementById("btn-rescan").addEventListener("click", function () {
+        setStatus("amber", "Scanning");
+        csInterface.evalScript('cepForceDiscovery()', function () {
+            cache = {};
+        });
+    });
+
     // ---- Polling Loop ----
 
     // Track whether any layer is settling (keyframe drag in progress).
@@ -108,6 +131,7 @@
     var _anySettling = false;
 
     function poll() {
+        flushStatus();
         var cmd = _anySettling
             ? 'cepReadRigState(true)'
             : 'cepReadRigState()';
@@ -136,6 +160,7 @@
                     cache[lyr.id] = {
                         parents: lyr.parents.slice(),
                         weights: lyr.weights.slice(),
+
                         wkh:     lyr.wkh || "",
                         restPos: lyr.restPos ? lyr.restPos.slice() : null,
                         postPos: lyr.postPos.slice(),
@@ -155,11 +180,19 @@
                     }
                 }
 
-                // Check for weight going from >0 to 0 (unparent)
+                // Check for weight going from >0 to 0 (unparent).
+                // With 2+ keyframes, the segment walker handles the transition
+                // correctly — no rebake needed (rebaking overwrites the expression's
+                // correct output and causes a jump). With 0-1 keys (manual slider),
+                // the rigid fallback produces the wrong position, so preserve the
+                // cached visual via cepPreserveAndRebake.
                 var unparented = false;
+                var unparentKeyframed = false;
                 for (var w = 0; w < lyr.weights.length; w++) {
                     if (prev.weights[w] > 0.001 && lyr.weights[w] < 0.001) {
                         unparented = true;
+                        var nk = lyr.wnk ? lyr.wnk[w] : 0;
+                        if (nk >= 2) { unparentKeyframed = true; }
                         break;
                     }
                 }
@@ -193,6 +226,7 @@
                     cache[lyr.id] = {
                         parents: lyr.parents.slice(),
                         weights: lyr.weights.slice(),
+
                         wkh:     lyr.wkh || "",
                         restPos: lyr.restPos || prev.restPos,
                         postPos: lyr.postPos || prev.postPos,
@@ -216,6 +250,7 @@
                         cache[lyr.id] = {
                             parents: lyr.parents.slice(),
                             weights: lyr.weights.slice(),
+    
                             wkh:     lyr.wkh || "",
                             restPos: lyr.restPos || prev.restPos,
                             postPos: lyr.postPos || prev.postPos,
@@ -229,12 +264,28 @@
                     }
                 }
 
-                // Two rebake paths depending on what changed:
-                //   preserveVisual: unparent only — keep child where it IS
+                // Three paths depending on what changed:
+                //   skip: keyframed unparent (2+ keys) — expression's segment
+                //     walker already handles the transition, rebaking would jump
+                //   preserveVisual: manual unparent (0-1 keys) — expression
+                //     produces wrong position, preserve cached visual
                 //   recompute: parent added/swapped, keyframe change, or child move
-                //     — recompute from rest (preserving rest avoids baking the
-                //     current expression delta into the base position)
-                var preserveVisual = unparented;
+                //     — recompute from rest
+                if (unparentKeyframed) {
+                    // Expression handles it. Just update cache, no rebake.
+                    cache[lyr.id] = {
+                        parents: lyr.parents.slice(),
+                        weights: lyr.weights.slice(),
+                        wkh:     lyr.wkh || "",
+                        restPos: lyr.restPos ? lyr.restPos.slice() : (prev ? prev.restPos : null),
+                        postPos: lyr.postPos ? lyr.postPos.slice() : (prev ? prev.postPos : null),
+                        postRot: lyr.postPos ? lyr.postRot : (prev ? prev.postRot : 0),
+                        postScl: lyr.postScl ? lyr.postScl.slice() : (prev ? prev.postScl : null),
+                        time:    state.time
+                    };
+                    continue;
+                }
+                var preserveVisual = unparented && !unparentKeyframed;
                 var recompute = parentChanged || settledRebake || keysChanged;
 
                 if (preserveVisual || recompute) {
@@ -268,6 +319,7 @@
                 cache[lyr.id] = {
                     parents: lyr.parents.slice(),
                     weights: lyr.weights.slice(),
+
                     wkh:     lyr.wkh || "",
                     restPos: lyr.restPos ? lyr.restPos.slice() : (prev ? prev.restPos : null),
                     postPos: lyr.postPos ? lyr.postPos.slice() : (prev ? prev.postPos : null),

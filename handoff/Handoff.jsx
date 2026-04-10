@@ -1,6 +1,6 @@
 /*
     Handoff — ScriptUI Panel
-    Version: 1.5.7
+    Version: 1.6.0
 
     Weighted, switchable, sticky dynamic parenting for After Effects.
 
@@ -2366,7 +2366,22 @@
         if (m) {
             var val = parseFloat(m[1]);
             // Treat the pass-1 sentinel -1e18 as "not a real anchor"
-            if (!isNaN(val) && val > -1e17) { return val; }
+            if (!isNaN(val) && val > -1e17) {
+                // If no slots were valid at the last bake, the apply time
+                // is stale (rig had no active parents). Discard it so a
+                // fresh parent addition anchors at comp.time, not at the
+                // old meaningless anchor.
+                var sv = expr.match(/HANDOFF_BAKED_SLOTS_VALID\s*=\s*\[([^\]]+)\]/);
+                if (sv) {
+                    var parts = sv[1].split(",");
+                    var anyValid = false;
+                    for (var i = 0; i < parts.length; i++) {
+                        if (parts[i].replace(/\s/g, "") === "true") { anyValid = true; break; }
+                    }
+                    if (!anyValid) { return null; }
+                }
+                return val;
+            }
         }
         return null;
     }

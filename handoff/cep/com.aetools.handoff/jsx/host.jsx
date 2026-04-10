@@ -31,6 +31,29 @@ function _registryRemove(id) {
     }
 }
 
+// ---- Auto-discovery of rigged layers ------------------------------------
+// On file open/reopen, all old layer IDs become invalid and the prune
+// empties the registry. _discoveryNeeded triggers a one-time scan of
+// every comp in the project to find layers with the Handoff effect.
+// Set true initially so the first poll after AE launch discovers layers.
+var _discoveryNeeded = true;
+
+function _discoverRiggedLayers() {
+    _ensureLoaded();
+    var H = $.global.__handoff;
+    var proj = app.project;
+    for (var i = 1; i <= proj.numItems; i++) {
+        var item = proj.item(i);
+        if (!(item instanceof CompItem)) { continue; }
+        for (var j = 1; j <= item.numLayers; j++) {
+            var lyr = item.layer(j);
+            if (H.findHandoffEffect(lyr) !== null) {
+                _registryAdd(lyr.id);
+            }
+        }
+    }
+}
+
 // ---- Load shared Handoff.jsx ---------------------------------------------
 
 // The CEP panel calls setHandoffJSXPath() at startup to tell us where
@@ -106,29 +129,45 @@ function cepReadRigState(lightMode) {
     }
 
     // Prune registry: remove IDs for layers that no longer exist or
-    // no longer have the Handoff effect (user may have deleted manually).
+    // no longer have the Handoff effect. Keep cross-comp layers (precomps)
+    // — they'll be skipped for state reading but stay registered for when
+    // the user switches to that comp.
     var validIds = [];
+    var hadEntries = _riggedLayerIds.length > 0;
     for (var r = 0; r < _riggedLayerIds.length; r++) {
         var rid = _riggedLayerIds[r];
         try {
             var rlyr = app.project.layerByID(rid);
-            if (rlyr.containingComp.id !== comp.id) { continue; }
             if (H.findHandoffEffect(rlyr) === null) { continue; }
             validIds.push(rid);
         } catch (e) {
-            // Layer no longer exists
+            // Layer no longer exists (deleted or different project)
         }
     }
     _riggedLayerIds = validIds;
 
+    // If the prune emptied a previously populated registry, a new project
+    // was likely opened (all old IDs became invalid). Flag for discovery.
+    if (hadEntries && validIds.length === 0) {
+        _discoveryNeeded = true;
+    }
+
+    // Run discovery once when needed (first poll, or after project change).
+    if (_riggedLayerIds.length === 0 && _discoveryNeeded) {
+        _discoverRiggedLayers();
+        _discoveryNeeded = false;
+    }
+
     var rigged = [];
     for (var i = 0; i < _riggedLayerIds.length; i++) {
         var lyr = app.project.layerByID(_riggedLayerIds[i]);
+        if (lyr.containingComp.id !== comp.id) { continue; }
         var fx = H.findHandoffEffect(lyr);
         if (fx === null) { continue; }
 
         var parents = [];
         var weights = [];
+        var weightNKeys = [];
         var weightKeyHash = "";
         for (var p = 1; p <= H.SLOTS; p++) {
             parents.push(fx.property(H.nLayer(p)).value);
@@ -139,6 +178,7 @@ function cepReadRigState(lightMode) {
             // which forces AE to resolve keyframe overlaps during active
             // drags and causes keyframes to jump forward.
             var nk = wp.numKeys;
+            weightNKeys.push(nk);
             weightKeyHash += nk;
             if (nk > 0) {
                 weightKeyHash += ":" + wp.valueAtTime(0, false).toFixed(4);
@@ -191,6 +231,8 @@ function cepReadRigState(lightMode) {
             parents:  parents,
             wkh:      weightKeyHash,
             weights:  weights,
+            wnk:      weightNKeys,
+
             restPos:  restPos,
             postPos:  postPos,
             postRot:  postRot,
@@ -251,4 +293,10 @@ function cepPreserveAndRebake(layerId, cachedPosJson, cachedRot, cachedSclJson) 
         app.endUndoGroup();
     }
     return JSON.stringify({ok: true});
+}
+
+function cepForceDiscovery() {
+    _riggedLayerIds = [];
+    _discoveryNeeded = true;
+    return cepReadRigState();
 }
