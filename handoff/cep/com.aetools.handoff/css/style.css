@@ -16,6 +16,7 @@ body {
 
 #toolbar {
     display: flex;
+    flex: 1;
     gap: 4px;
 }
 
