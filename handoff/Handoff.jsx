@@ -1,6 +1,6 @@
 /*
     Handoff — ScriptUI Panel
-    Version: 1.3.1
+    Version: 1.3.2
 
     Weighted, switchable, sticky dynamic parenting for After Effects.
 
@@ -2400,16 +2400,20 @@
     // target_visual is whatever the old rig was showing, so re-clicking
     // Handoff re-anchors the rig to the current moment without moving
     // the layer visually — exactly what you want.
-    function writeExpressions(layer, fx) {
+    function writeExpressions(layer, fx, overrideApplyTime) {
         var comp = layer.containingComp;
         var now  = comp.time;
 
-        // Preserve the rig\'s original apply anchor across refresh. Fresh
-        // applies use `now`; refreshes inherit whatever the previous apply
-        // used, so re-clicking Handoff at a different comp time doesn\'t
-        // rebase the anchor and wipe out the tracking history between the
-        // original anchor and now.
-        var oldApply           = readOldApplyTime(layer);
+        // Determine the effective apply time. Priority:
+        //   1. Explicit override (passed by refreshRig which saved it before clearing)
+        //   2. Read from existing expression (if expressions weren't cleared)
+        //   3. Fall back to current comp.time (fresh apply)
+        var oldApply;
+        if (typeof overrideApplyTime === "number" && overrideApplyTime > -1e17) {
+            oldApply = overrideApplyTime;
+        } else {
+            oldApply = readOldApplyTime(layer);
+        }
         var effectiveApplyTime = (oldApply !== null) ? oldApply : now;
 
         var tg    = layer.property("ADBE Transform Group");
@@ -2417,43 +2421,46 @@
         var rotP  = tg.property("ADBE Rotate Z");
         var sclP  = tg.property("ADBE Scale");
 
-        // --- Step 1: snapshot target visual BEFORE changing any expression.
-        // This captures whatever the layer looks like right now — including
-        // the old rig\'s contribution, if any.
+        // --- Step 1: snapshot target visual at effectiveApplyTime. For a
+        // fresh apply this is comp.time. For a refresh it's the ORIGINAL apply
+        // time (preserved across clears by refreshRig). This ensures the rig
+        // is anchored at a consistent time, not wherever the playhead happens
+        // to be when the CEP poll fires.
+        var snapTime = effectiveApplyTime;
         var targetPos;
         if (posU.dimensionsSeparated) {
             var tgP0 = tg.property("ADBE Position_0");
             var tgP1 = tg.property("ADBE Position_1");
             var tgP2 = layer.threeDLayer ? tg.property("ADBE Position_2") : null;
-            targetPos = [tgP0.valueAtTime(now, false), tgP1.valueAtTime(now, false), tgP2 ? tgP2.valueAtTime(now, false) : 0];
+            targetPos = [tgP0.valueAtTime(snapTime, false), tgP1.valueAtTime(snapTime, false), tgP2 ? tgP2.valueAtTime(snapTime, false) : 0];
         } else {
-            var tv = posU.valueAtTime(now, false);
+            var tv = posU.valueAtTime(snapTime, false);
             targetPos = [tv[0], tv[1], tv[2] || 0];
         }
-        var targetRot = rotP.valueAtTime(now, false);
-        var targetScl = sclP.valueAtTime(now, false);
+        var targetRot = rotP.valueAtTime(snapTime, false);
+        var targetScl = sclP.valueAtTime(snapTime, false);
 
-        // --- Step 2: compute bakes.
-        var bakes = computeBakes(layer, fx, now);
+        // --- Step 2: compute bakes at effectiveApplyTime.
+        var bakes = computeBakes(layer, fx, snapTime);
 
         // --- Step 3: Pass 1. Zero offsets, apply_time sentinel -1e18 so
         // the clamp is inactive and the rig runs at full strength at now.
         var pass1Prefix = renderBakePrefix(bakes, [0, 0, 0], 0, [0, 0], -1e18);
         writeAllExpressions(layer, pass1Prefix);
 
-        // --- Step 4: read pass 1 post-expression values at now.
+        // --- Step 4: read pass 1 post-expression values at snapTime.
         var pass1Pos;
         if (posU.dimensionsSeparated) {
             var p0x = tg.property("ADBE Position_0");
             var p0y = tg.property("ADBE Position_1");
             var p0z = layer.threeDLayer ? tg.property("ADBE Position_2") : null;
-            pass1Pos = [p0x.valueAtTime(now, false), p0y.valueAtTime(now, false), p0z ? p0z.valueAtTime(now, false) : 0];
+            pass1Pos = [p0x.valueAtTime(snapTime, false), p0y.valueAtTime(snapTime, false), p0z ? p0z.valueAtTime(snapTime, false) : 0];
         } else {
-            var pv = posU.valueAtTime(now, false);
+            var pv = posU.valueAtTime(snapTime, false);
             pass1Pos = [pv[0], pv[1], pv[2] || 0];
         }
-        var pass1Rot = rotP.valueAtTime(now, false);
-        var pass1Scl = sclP.valueAtTime(now, false);
+        var pass1Rot = rotP.valueAtTime(snapTime, false);
+        var pass1Scl = sclP.valueAtTime(snapTime, false);
 
         // --- Step 5: offsets = pass1_post - target_visual. This is what
         // the final expression must subtract so that result(now) == target.
@@ -2533,6 +2540,10 @@
         if (fx === null) {
             throw new Error("No Handoff rig found on the selected layer. Apply one first.");
         }
+        // Read the old apply time BEFORE clearing expressions — clearing
+        // destroys the expression text that readOldApplyTime parses.
+        var savedApplyTime = readOldApplyTime(layer);
+
         // Clear existing expressions BEFORE writeExpressions snapshots the
         // target visual. Without this, the snapshot captures the old rig's
         // stale-bake output, and the two-pass offset locks in the wrong pos.
@@ -2543,7 +2554,7 @@
         safeClearExpression(tg.property("ADBE Position_2"));
         safeClearExpression(tg.property("ADBE Rotate Z"));
         safeClearExpression(tg.property("ADBE Scale"));
-        writeExpressions(layer, fx);
+        writeExpressions(layer, fx, savedApplyTime);
     }
 
     // ---- CEP mode exports ----------------------------------------------------
