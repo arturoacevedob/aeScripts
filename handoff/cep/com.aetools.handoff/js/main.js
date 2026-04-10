@@ -238,25 +238,6 @@
                 var recompute = parentChanged || settledRebake || keysChanged;
 
                 if (preserveVisual || recompute) {
-                    // Time guard: skip if playhead moved since we cached.
-                    // Only applies to visual-dependent rebakes (unparent uses
-                    // cached visual). Parent changes and keyframe settles use
-                    // refreshRig which reads apply time from the expression,
-                    // so they're safe regardless of playhead position.
-                    if (preserveVisual && Math.abs(state.time - prev.time) > 0.001) {
-                        cache[lyr.id] = {
-                            parents: lyr.parents.slice(),
-                            weights: lyr.weights.slice(),
-                            wkh:     lyr.wkh || "",
-                            restPos: lyr.restPos || prev.restPos,
-                            postPos: lyr.postPos || prev.postPos,
-                            postRot: lyr.postPos ? lyr.postRot : prev.postRot,
-                            postScl: lyr.postScl || prev.postScl,
-                            time:    state.time
-                        };
-                        continue;
-                    }
-
                     setStatus("amber", "Rebaking");
 
                     if (preserveVisual) {
