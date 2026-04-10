@@ -341,6 +341,8 @@
             // Status: tracking if any layers rigged and not settling
             if (!_anySettling && state.rigged.length > 0) {
                 setStatus("green", "Tracking " + state.rigged.length + " layer" + (state.rigged.length > 1 ? "s" : ""));
+            } else if (!_anySettling && state.rigged.length === 0) {
+                setStatus("", "Idle");
             }
         });
     }

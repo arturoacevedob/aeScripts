@@ -114,6 +114,7 @@ function cepRemoveRig(layerId) {
     try {
         H.removeRig(layer);
         _registryRemove(layerId);
+        layer.selected = true;
     } finally {
         app.endUndoGroup();
     }
