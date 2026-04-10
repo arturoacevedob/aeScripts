@@ -8,7 +8,7 @@ Dynamic parenting rig for After Effects. Two delivery modes:
 Source-of-truth `.ffx` lives at `handoff/Handoff.ffx`. CEP bundles it
 directly; standalone JSX embeds it as hex-escaped binary.
 
-## CEP architecture (v1.4.x)
+## CEP architecture (v1.5.x)
 
 `host.jsx` sets `$.global.__handoff_cep = true`, then `$.evalFile`s
 `Handoff.jsx`. The IIFE detects CEP mode and exports functions to
@@ -16,7 +16,8 @@ directly; standalone JSX embeds it as hex-escaped binary.
 
 `main.js` polls via `CSInterface.evalScript('cepReadRigState()')` every
 100ms. Read-only calls do NOT create undo entries (unlike scheduleTask).
-Writes only on detected changes — one undo group per rebake.
+Writes only on detected changes — one undo group per rebake ("Handoff
+Auto-Update"). Status bar shows live state: Tracking/Settling/Rebaking.
 
 **Change detection triggers:**
 - Parent added/swapped → `cepApplyOrRefresh` (recompute from rest)
@@ -29,6 +30,28 @@ visual. All other changes — including parent assignment — recompute from
 the PRE-expression rest position. Using `cepPreserveAndRebake` for parent
 additions bakes the current expression delta into the rest position,
 corrupting all tracking (see failed approaches).
+
+**Light-mode polling (v1.5.x):** during keyframe settling, the poll
+skips expression evaluation (`cepReadRigState(true)`). Only parents,
+weights, and the keyframe hash are read — no `valueAtTime` calls. This
+prevents blocking AE's main thread during keyframe drags.
+
+**Keyframe hash (v1.4.3+):** the weight key hash samples interpolated
+values at three sentinel times (0, mid, end) instead of reading individual
+`keyTime()` values. Reading `keyTime()` during active keyframe drags forces
+AE to resolve overlapping keyframes, pushing the target keyframe forward.
+
+**Undo (v1.5.x):** each CEP rebake creates one undo group ("Handoff
+Auto-Update"). Cmd+Z requires two presses: first undoes the rebake,
+second undoes the user action. Single-undo is architecturally impossible
+with async CEP polling (the user action and the rebake are separate
+events separated by the settling delay).
+
+**FFX cache:** `ensureFFX` always rewrites the cached FFX from the
+embedded blob (no size-comparison check). In CEP mode, the FFX is
+loaded from `assets/Handoff.ffx` inside the extension folder.
+`embed_ffx.js` copies the source FFX to both the JSX embed and the
+CEP assets folder to keep them in sync.
 
 **Live reload without restarting AE:**
 - ExtendScript: `_handoffJSXLoaded = false; _ensureLoaded();`
@@ -184,6 +207,29 @@ until the CEP corrects it.
   contribution. Use `cepApplyOrRefresh` for parent changes; reserve
   `cepPreserveAndRebake` for unparenting only (weight→0).
 
+- **Time guard on rebake (skip if playhead moved).** The guard compared
+  `state.time` to `prev.time` and skipped the rebake if the playhead
+  moved, BUT still updated the cache with the new parents/weights. This
+  silently ate parent-change and unparent notifications — the change was
+  cached but never acted on. Removed entirely: `cepApplyOrRefresh` uses
+  `refreshRig` which reads apply time from the expression (playhead-safe),
+  and `cepPreserveAndRebake` uses the previously cached visual (also safe).
+
+- **Removing undo groups from CEP rebakes.** Without `beginUndoGroup`,
+  each expression clear/write creates its own micro-undo entry (~10+ per
+  rebake). Cmd+Z becomes unpredictable — you might undo a single
+  `safeClearExpression` call. Always wrap rebakes in a single undo group.
+
+- **Reading `keyTime(k)` in `cepReadRigState` weight key hash.** When
+  two keyframes are near the same time during a drag, the ExtendScript
+  read via `evalScript` forces AE to resolve the overlap, pushing the
+  target keyframe forward by the inter-key distance. Use interpolated
+  value samples at sentinel times instead of per-key time reads.
+
+- **FFX cache with size-comparison check.** Same-length content changes
+  (e.g. "by" → "at") pass the size check. `ensureFFX` now always
+  rewrites. `embed_ffx.js` also copies to CEP `assets/` folder.
+
 ## Expression resilience: near-identical keyframes (v1.4.0)
 
 When users drag weight keyframes close together, AE can throw:
@@ -235,6 +281,12 @@ These broke earlier rewrites. Don't rediscover them.
 - **`_rlyr.position.numKeys` works in expressions.** Layer references from
   `FX("P1 Layer")` support `.position`, `.rotation`, `.scale` accessors
   with `.numKeys` to check if the parent has transform keyframes.
+- **`evalScript` reading `keyTime(k)` during UI drags pushes keyframes.**
+  When two keyframes are near the same time, the ExtendScript read forces
+  AE to resolve the overlap. Use interpolated value samples instead.
+- **Pseudo effect label trailing periods** — AE strips trailing `.` from
+  pseudo effect label display names in the Effect Controls panel. The data
+  is correct in the FFX; it's an AE UI rendering behavior.
 
 ## Pseudo effect via embedded binary (Smart Rekt / rendertom pattern)
 

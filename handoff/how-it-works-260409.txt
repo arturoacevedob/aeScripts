@@ -186,13 +186,21 @@ RESULT = value * exp(totalLog - BAKED_APPLY_OFFSET_LOG_SCALE)
 ### 7. CEP Polling Loop — Change Detection
 
 ```
-Every 100ms:
+Every 100ms (light mode during settling, full mode otherwise):
 ┌─────────────────────────────────────────────────────┐
-│ evalScript('cepReadRigState()')  [READ ONLY, no undo]│
+│ evalScript('cepReadRigState(light?)')                │
 │                                                      │
-│ Returns per rigged layer:                            │
+│ Full mode returns per rigged layer:                  │
 │   parents[], weights[], weightKeyHash,               │
 │   restPos[], postPos[], postRot, postScl[], time     │
+│                                                      │
+│ Light mode (during settling) returns:                │
+│   parents[], weights[], weightKeyHash only           │
+│   (skips valueAtTime calls to avoid blocking AE)     │
+│                                                      │
+│ weightKeyHash: samples interpolated values at 3      │
+│   sentinel times (0, mid, end) — NOT keyTime() reads │
+│   (keyTime reads push keyframes during drags)        │
 │                                                      │
 │ Compare to cached state:                             │
 │                                                      │
@@ -210,6 +218,9 @@ Every 100ms:
 │   → cepApplyOrRefresh                                │
 │                                                      │
 │ After any rebake: delete cache[id] to prevent loop   │
+│                                                      │
+│ Status bar: green=Tracking, amber=Settling/Rebaking  │
+│             red=Disconnected, gray=Idle               │
 └─────────────────────────────────────────────────────┘
 ```
 
