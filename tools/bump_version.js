@@ -40,6 +40,7 @@ const VERSION_FILE = path.join(ROOT, 'VERSION');
 // scripts here as the collection grows.
 const JSX_TARGETS = [
     path.join(ROOT, 'handoff', 'Handoff.jsx'),
+    path.join(ROOT, 'vGallery', 'vGalleryRig.jsx'),
 ];
 
 // Additional files with version strings in other formats.
