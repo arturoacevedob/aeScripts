@@ -1,5 +1,5 @@
 // vGalleryRig.jsx — V-shape gallery rig applier for After Effects
-// Version: 1.8.0
+// Version: 1.8.1
 //
 // Drop into After Effects' Scripts/ScriptUI Panels/ folder, restart AE,
 // open via Window menu. See vGallery/README.md for usage.
@@ -674,6 +674,20 @@
 
     function buildExpressions(ctrlName) {
         var ref = "thisComp.layer(\"" + ctrlName + "\")";
+
+        var positionBody =
+            "var ctrl = " + ref + ";\n" +
+            "var halfAng = degreesToRadians(ctrl.effect(\"vGallery\")(\"V Angle\") / 2);\n" +
+            "var totalLen = ctrl.effect(\"vGallery\")(\"Total Length\");\n" +
+            "var halfLen = totalLen / 2;\n" +
+            "var p = effect(\"vGallery Travel Location\")(\"Slider\");\n" +
+            "var d = p;\n" +
+            "if (d > halfLen) { d = d - totalLen; }\n" +
+            "var legSign = (d >= 0) ? 1 : -1;\n" +
+            "var legDist = Math.abs(d);\n" +
+            "var localX = legSign * legDist * Math.sin(halfAng);\n" +
+            "var localY = legDist * Math.cos(halfAng);\n";
+
         return {
             travelLocation:
                 "var ctrl = " + ref + ";\n" +
@@ -694,19 +708,12 @@
                 "    (((offset - myIdx) * spacing) % totalLen + totalLen) % totalLen;\n" +
                 "}",
 
-            position:
-                "var ctrl = " + ref + ";\n" +
-                "var halfAng = degreesToRadians(ctrl.effect(\"vGallery\")(\"V Angle\") / 2);\n" +
-                "var totalLen = ctrl.effect(\"vGallery\")(\"Total Length\");\n" +
-                "var halfLen = totalLen / 2;\n" +
-                "var p = effect(\"vGallery Travel Location\")(\"Slider\");\n" +
-                "var d = p;\n" +
-                "if (d > halfLen) { d = d - totalLen; }\n" +
-                "var legSign = (d >= 0) ? 1 : -1;\n" +
-                "var legDist = Math.abs(d);\n" +
-                "var localX = legSign * legDist * Math.sin(halfAng);\n" +
-                "var localY = legDist * Math.cos(halfAng);\n" +
-                "ctrl.toWorld([localX, localY, 0]);",
+            // Unified position — used when dimensionsSeparated is false
+            position:  positionBody + "ctrl.toWorld([localX, localY, 0]);",
+            // Per-axis variants — used when dimensionsSeparated is true (separated X/Y/Z)
+            positionX: positionBody + "ctrl.toWorld([localX, localY, 0])[0];",
+            positionY: positionBody + "ctrl.toWorld([localX, localY, 0])[1];",
+            positionZ: positionBody + "ctrl.toWorld([localX, localY, 0])[2];",
 
             tintAmount:
                 "var ctrl = " + ref + ";\n" +
@@ -786,7 +793,19 @@
         ds     = findEffectByName(layer, EFFECT_VG_DROP_SHADOW);
 
         slider.property("ADBE Slider Control-0001").expression = exprs.travelLocation;
-        layer.transform.position.expression = exprs.position;
+
+        // Position: handle separated dimensions. If unified position is hidden
+        // (dimensionsSeparated === true) we must set per-axis expressions.
+        var pos = layer.transform.position;
+        if (pos.dimensionsSeparated) {
+            layer.transform.property("ADBE Position_0").expression = exprs.positionX;
+            layer.transform.property("ADBE Position_1").expression = exprs.positionY;
+            // Z axis only exists for 3D layers (which we just enabled above).
+            var zAxis = layer.transform.property("ADBE Position_2");
+            if (zAxis) { zAxis.expression = exprs.positionZ; }
+        } else {
+            pos.expression = exprs.position;
+        }
 
         tint.property("ADBE Tint-0001").expression = exprs.fadeColor; // Map Black To
         tint.property("ADBE Tint-0002").expression = exprs.fadeColor; // Map White To
@@ -952,7 +971,16 @@
                     removeEffectByName(L, EFFECT_VG_TINT);
                     removeEffectByName(L, EFFECT_VG_DROP_SHADOW);
                     if (L.transform && L.transform.position) {
-                        L.transform.position.expression = "";
+                        if (L.transform.position.dimensionsSeparated) {
+                            var ax0 = L.transform.property("ADBE Position_0");
+                            var ax1 = L.transform.property("ADBE Position_1");
+                            var ax2 = L.transform.property("ADBE Position_2");
+                            if (ax0) { ax0.expression = ""; }
+                            if (ax1) { ax1.expression = ""; }
+                            if (ax2) { ax2.expression = ""; }
+                        } else {
+                            L.transform.position.expression = "";
+                        }
                     }
                 } catch (perLayerErr) {
                     // Silent — Remove Rig is best-effort
